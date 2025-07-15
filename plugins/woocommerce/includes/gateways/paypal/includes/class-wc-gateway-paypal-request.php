@@ -16,6 +16,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WC_Gateway_Paypal_Request {
 
+	// TODO: This will be replaced with a WPCOM API endpoint
+	const CREATE_ORDER_API_URL = 'https://api-m.sandbox.paypal.com/v2/checkout/orders';
+
 	/**
 	 * Stores line items to send to PayPal.
 	 *
@@ -86,6 +89,161 @@ class WC_Gateway_Paypal_Request {
 		WC_Gateway_Paypal::log( 'PayPal Request Args for order ' . $order->get_order_number() . ': ' . wc_print_r( array_merge( $paypal_args, array_intersect_key( $mask, $paypal_args ) ), true ) );
 
 		return $this->endpoint . http_build_query( $paypal_args, '', '&' );
+	}
+
+	// TODO: This will be replaced with the logic for getting the wpcom access token
+	private function get_paypal_access_token() {
+		$paypal_client_id = $this->gateway->get_option( 'PAYPAL_CLIENT_ID' );
+		$paypal_client_secret = $this->gateway->get_option( 'PAYPAL_CLIENT_SECRET' );
+
+		if ( ! $paypal_client_id || ! $paypal_client_secret ) {
+			error_log( 'PayPal client ID or secret not found. Cannot get access token.' );
+			return null;
+		}
+
+		$args = [
+			'method'    => 'POST',
+			'headers'   => [
+				'Content-Type'  => 'application/x-www-form-urlencoded',
+				'Authorization' => 'Basic ' . base64_encode( $paypal_client_id . ':' . $paypal_client_secret ),
+			],
+			'body'      => 'grant_type=client_credentials',
+			'timeout'   => 45, // TODO
+			'sslverify' => false, // TODO
+		];
+		error_log( 'PayPal access token request: ' . print_r( $args, true ) );
+
+		$response = wp_remote_post( 'https://api-m.sandbox.paypal.com/v1/oauth2/token', $args);
+		if ( is_wp_error( $response ) ) {
+			error_log( 'WordPress HTTP Error (Access Token): ' . $response->get_error_message() );
+			return null;
+		}
+
+    	$http_code = wp_remote_retrieve_response_code( $response );
+    	$body = wp_remote_retrieve_body( $response );
+    	$data = json_decode( $body, true );
+
+    	// Check if the request was successful (HTTP 200 OK) and access token exists
+		if ( $http_code === 200 && isset( $data['access_token'] ) ) {
+			error_log( 'PayPal access token request successful.' );
+			return $data['access_token'];
+		} else {
+			error_log( 'Failed to get PayPal access token. HTTP Code: ' . $http_code . ' Response: ' . $body );
+			return null;
+		}
+	}
+
+	public function create_paypal_order( $order ) {
+		$accessToken = $this->get_paypal_access_token();
+		if ( ! $accessToken ) {
+			error_log( 'Could not obtain PayPal access token. Cannot create order.' );
+			return null;
+		}
+
+		$order_details = [
+    		'intent' => 'CAPTURE', // Or 'AUTHORIZE' (TODO: Check if 'capture later' is supported currently)
+			'purchase_units' => [
+				[
+					'custom_id' => $order->get_id(), // TODO: This can hold a string of 255 chars
+					'amount' => [
+						'currency_code' => get_woocommerce_currency(),
+						'value' => $order->get_total(),
+					],
+					'description' => get_bloginfo( 'name' ), // TODO
+				],
+			],
+			'application_context' => [
+				'return_url' => esc_url_raw( add_query_arg( 'utm_nooverride', '1', $this->gateway->get_return_url( $order ) ) ), // Customer redirected here on approval
+				'cancel_url' => esc_url_raw( $order->get_cancel_order_url_raw() ),  // Customer redirected here on cancellation
+				//'locale' => get_locale(), // TODO: PayPal has its own locale format, will need conversion
+			],
+		];
+
+		$args = [
+			'method'    => 'POST',
+			'headers'   => [
+				'Content-Type'  => 'application/json',
+				'Authorization' => 'Bearer ' . $accessToken,
+				'PayPal-Request-Id' => uniqid(), // A unique ID for idempotency (recommended by PayPal)
+			],
+			'body'      => json_encode( $order_details ),
+			'timeout'   => 45, // TODO
+			'sslverify' => false, // TODO
+		];
+
+    	error_log( 'PayPal order creation request: ' . print_r( $args, true ) );
+    	$response = wp_remote_post( CREATE_ORDER_API_URL, $args );
+		if ( is_wp_error( $response ) ) {
+			error_log( 'WordPress HTTP Error (Create Order): ' . $response->get_error_message() );
+			return null;
+		}
+
+		$http_code = wp_remote_retrieve_response_code( $response );
+		$body = wp_remote_retrieve_body( $response );
+		$data = json_decode( $body, true );
+		error_log( 'PayPal order creation response: ' . print_r( $data, true ) );
+
+		// Check if the order creation was successful (HTTP 201 Created)
+		if ( $http_code === 201 && isset( $data['id'] ) && isset( $data['links'] ) ) {
+			// Find the 'approve' link in the response -- this is where we will redirect the customer to
+			$redirect_url = null;
+			foreach ( $data['links'] as $link ) {
+				if ( $link['rel'] === 'approve' && $link['method'] === 'GET' ) {
+					$redirect_url = $link['href'];
+					break;
+				}
+			}
+
+			return [
+				'id' => $data['id'],
+				'redirect_url' => $redirect_url,
+			];
+		} else {
+			error_log( 'Failed to create PayPal order. HTTP Code: ' . $http_code . ' Response: ' . $body );
+			return null;
+		}
+	}
+
+	// TODO: The capture phase will likely live in the wpcom layer
+	public function capture_paypal_order( $order, $capture_url ) {
+		$accessToken = $this->get_paypal_access_token();
+		if ( ! $accessToken ) {
+			error_log( 'Could not obtain PayPal access token. Cannot capture order.' );
+			return null;
+		}
+
+		$paypal_order_id = $order->get_meta( '_paypal_order_id' );
+		if ( ! $paypal_order_id ) {
+			error_log( 'PayPal order ID not found. Cannot capture order.' );
+			return null;
+		}
+
+		$args = [
+			'method'    => 'POST',
+			'headers'   => [
+				'Content-Type'  => 'application/json',
+				'Authorization' => 'Bearer ' . $accessToken,
+			],
+			'body'      => json_encode( [ 'id' => $paypal_order_id ] ),
+		];
+
+		$response = wp_remote_post( $capture_url, $args );
+		if ( is_wp_error( $response ) ) {
+			error_log( 'WordPress HTTP Error (Capture Order): ' . $response->get_error_message() );
+			return null;
+		}
+
+		$http_code = wp_remote_retrieve_response_code( $response );
+		$body = wp_remote_retrieve_body( $response );
+		$data = json_decode( $body, true );
+		error_log( 'PayPal order capture response: ' . print_r( $data, true ) );
+
+		if ( $http_code === 200 && isset( $data['status'] ) && $data['status'] === 'COMPLETED' ) {
+			return true;
+		} else {
+			error_log( 'Failed to capture PayPal order. HTTP Code: ' . $http_code . ' Response: ' . $body );
+			return false;
+		}
 	}
 
 	/**

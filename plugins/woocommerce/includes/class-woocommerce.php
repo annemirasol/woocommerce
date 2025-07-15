@@ -237,6 +237,9 @@ final class WooCommerce {
 		$this->define_tables();
 		$this->includes();
 		$this->init_hooks();
+
+		// TODO: Where is the best placing for this?
+		include_once dirname( __FILE__ ) . '/gateways/paypal/includes/class-wc-gateway-paypal-webhook-handler.php';
 	}
 
 	/**
