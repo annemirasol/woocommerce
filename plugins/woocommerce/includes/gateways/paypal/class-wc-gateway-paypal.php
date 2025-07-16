@@ -372,6 +372,9 @@ class WC_Gateway_Paypal extends WC_Payment_Gateway {
 
 		if ( $this->use_orders_v2() ) {
 			$paypal_order = $paypal_request->create_paypal_order( $order );
+			if ( ! $paypal_order ) {
+				throw new Exception( 'PayPal order creation failed' );
+			}
 			$order->update_meta_data( '_paypal_order_id', $paypal_order['id'] );
 			$order->save();
 			$redirect_url = $paypal_order['redirect_url'];
@@ -591,7 +594,7 @@ class WC_Gateway_Paypal extends WC_Payment_Gateway {
 		 */
 		return apply_filters(
 			'woocommerce_paypal_use_orders_v2',
-			'yes' === $paypal_settings['use_orders_v2']
+			isset( $paypal_settings['use_orders_v2'] ) && 'yes' === $paypal_settings['use_orders_v2']
 		);
 	}
 }

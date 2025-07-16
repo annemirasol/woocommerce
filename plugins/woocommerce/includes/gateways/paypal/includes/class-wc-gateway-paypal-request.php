@@ -150,6 +150,9 @@ class WC_Gateway_Paypal_Request {
 						'value' => $order->get_total(),
 					],
 					'description' => get_bloginfo( 'name' ), // TODO
+					'payee' => [
+						'email_address' => $this->gateway->get_option( 'payee_email' ), // TODO: For spike only, to test payee
+					],
 				],
 			],
 			'application_context' => [
@@ -172,7 +175,7 @@ class WC_Gateway_Paypal_Request {
 		];
 
     	error_log( 'PayPal order creation request: ' . print_r( $args, true ) );
-    	$response = wp_remote_post( CREATE_ORDER_API_URL, $args );
+		$response = wp_remote_post( self::CREATE_ORDER_API_URL, $args );
 		if ( is_wp_error( $response ) ) {
 			error_log( 'WordPress HTTP Error (Create Order): ' . $response->get_error_message() );
 			return null;
@@ -238,7 +241,7 @@ class WC_Gateway_Paypal_Request {
 		$data = json_decode( $body, true );
 		error_log( 'PayPal order capture response: ' . print_r( $data, true ) );
 
-		if ( $http_code === 200 && isset( $data['status'] ) && $data['status'] === 'COMPLETED' ) {
+		if ( in_array( $http_code, [ 200, 201 ] ) && isset( $data['status'] ) && $data['status'] === 'COMPLETED' ) {
 			return true;
 		} else {
 			error_log( 'Failed to capture PayPal order. HTTP Code: ' . $http_code . ' Response: ' . $body );

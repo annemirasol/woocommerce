@@ -71,6 +71,7 @@ class WC_Gateway_Paypal_Webhook_Handler {
 
                 // TODO: Add order notes
                 break;
+            // TODO: Handle CHECKOUT.ORDER.COMPLETED
             // TODO: Handle failed cases
             default:
                 error_log( 'Unhandled PayPal webhook event: ' . print_r( $data, true ) );
