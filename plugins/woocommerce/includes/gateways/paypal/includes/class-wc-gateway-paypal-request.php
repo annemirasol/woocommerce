@@ -144,7 +144,13 @@ class WC_Gateway_Paypal_Request {
     		'intent' => 'CAPTURE', // Or 'AUTHORIZE' (TODO: Check if 'capture later' is supported currently)
 			'purchase_units' => [
 				[
-					'custom_id' => $order->get_id(), // TODO: This can hold a string of 255 chars
+					'custom_id' => wp_json_encode(
+						[
+							'order_id' => $order->get_id(),
+							'order_key' => $order->get_order_key(),
+							'endpoint' => get_site_url( null, '/wp-json/wc-paypal-gateway/v1/webhook' ), // Endpoint to send webhooks to
+						]
+					),
 					'amount' => [
 						'currency_code' => get_woocommerce_currency(),
 						'value' => $order->get_total(),
@@ -175,6 +181,7 @@ class WC_Gateway_Paypal_Request {
 		];
 
     	error_log( 'PayPal order creation request: ' . print_r( $args, true ) );
+
 		$response = wp_remote_post( self::CREATE_ORDER_API_URL, $args );
 		if ( is_wp_error( $response ) ) {
 			error_log( 'WordPress HTTP Error (Create Order): ' . $response->get_error_message() );
@@ -207,7 +214,6 @@ class WC_Gateway_Paypal_Request {
 		}
 	}
 
-	// TODO: The capture phase will likely live in the wpcom layer
 	public function capture_paypal_order( $order, $capture_url ) {
 		$accessToken = $this->get_paypal_access_token();
 		if ( ! $accessToken ) {

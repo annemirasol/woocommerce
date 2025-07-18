@@ -34,17 +34,19 @@ class WC_Gateway_Paypal_Webhook_Handler {
         // TODO: Validate the webhook signature
 
         $data = $request->get_json_params();
-        error_log( 'PayPal webhook received: ' . print_r( $data, true ) );
+        error_log( '(Client) PayPal webhook received: ' . print_r( $data, true ) );
 
-        // TODO: This will be replaced by events from wpcom.
-        // CHECKOUT.ORDER.APPROVED is likely to be handled by the wpcom layer only.
-        // We likely will only need to handle payment capture events.
         switch ( $data['event_type'] ) {
             case 'CHECKOUT.ORDER.APPROVED':
-                $order_id = $data['resource']['purchase_units'][0]['custom_id'];
+                $order_id = $this->get_order_id_from_custom_data( $data['resource']['purchase_units'][0]['custom_id'] );
                 $order = wc_get_order( $order_id );
-                // TODO: How can we verify we are working on the correct order?
-                // Maybe verify the PayPal order ID, ie. $data['resource']['id'] with $order->get_meta( '_paypal_order_id' )?
+                if ( ! $order ) {
+                    error_log( 'Order not found: ' . $order_id );
+                    return new WP_REST_Response( 'Order not found', 404 );
+                }
+
+                // TODO: Maybe verify order key and PayPal order ID, to
+                // ensure this is for the correct order.
 
                 if ( $data['resource']['status'] === 'APPROVED' ) {
                     $capture_url = null;
@@ -62,14 +64,17 @@ class WC_Gateway_Paypal_Webhook_Handler {
                 }
                 break;
             case 'PAYMENT.CAPTURE.COMPLETED':
-                $order_id = $data['resource']['custom_id'];
+                $order_id = $this->get_order_id_from_custom_data( $data['resource']['custom_id'] );
                 $order = wc_get_order( $order_id );
-                // TODO: How can we verify we are working on the correct order?
-                // Maybe verify the PayPal order ID, ie. $data['resource']['id'] with $order->get_meta( '_paypal_order_id' )?
+                if ( ! $order ) {
+                    error_log( 'Order not found: ' . $order_id );
+                    return new WP_REST_Response( 'Order not found', 404 );
+                }
 
+                // TODO: Maybe verify order key and PayPal order ID, to
+                // ensure this is for the correct order.
                 $order->payment_complete();
-
-                // TODO: Add order notes
+                $order->add_order_note( 'PayPal payment captured. ID: ' . $data['resource']['id'] );
                 break;
             // TODO: Handle CHECKOUT.ORDER.COMPLETED
             // TODO: Handle failed cases
@@ -79,6 +84,11 @@ class WC_Gateway_Paypal_Webhook_Handler {
         }
 
         return new WP_REST_Response( 'Webhook processed', 200 );
+    }
+
+    private function get_order_id_from_custom_data( $custom_data ) {
+        $data = json_decode( $custom_data );
+        return $data->order_id ?? null;
     }
 }
 
