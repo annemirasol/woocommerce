@@ -237,6 +237,16 @@ final class WooCommerce {
 		$this->define_tables();
 		$this->includes();
 		$this->init_hooks();
+
+		// TODO: Where is the best placing for this?
+		// Webhook listener for the client.
+		include_once dirname( __FILE__ ) . '/gateways/paypal/includes/class-wc-gateway-paypal-webhook-handler.php';
+
+		// Webhook listener for the simple proxy PoC.
+		include_once dirname( __FILE__ ) . '/gateways/paypal/includes/proxy/class-wc-gateway-paypal-proxy-webhook-handler.php';
+
+		// Proxy for the PayPal API.
+		include_once dirname( __FILE__ ) . '/gateways/paypal/includes/proxy/class-wc-gateway-paypal-proxy.php';
 	}
 
 	/**

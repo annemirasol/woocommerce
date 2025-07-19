@@ -15,7 +15,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Generates requests to send to PayPal.
  */
 class WC_Gateway_Paypal_Request {
-
 	/**
 	 * Stores line items to send to PayPal.
 	 *
@@ -86,6 +85,94 @@ class WC_Gateway_Paypal_Request {
 		WC_Gateway_Paypal::log( 'PayPal Request Args for order ' . $order->get_order_number() . ': ' . wc_print_r( array_merge( $paypal_args, array_intersect_key( $mask, $paypal_args ) ), true ) );
 
 		return $this->endpoint . http_build_query( $paypal_args, '', '&' );
+	}
+
+	public function create_paypal_order( $order ) {
+		$order_details = [
+    		'intent' => 'CAPTURE', // TODO:Or 'AUTHORIZE' for capture-later
+			'purchase_units' => [
+				// TODO: line items
+				[
+					// TODO: Must limit to 255 chars.
+					'custom_id' => wp_json_encode(
+						[
+							'order_id' => $order->get_id(),
+							'order_key' => $order->get_order_key(),
+							// Endpoint for the proxy to forward webhooks to.
+							'endpoint' => get_site_url( null, '/wp-json/wc-paypal-gateway/v1/webhook' ),
+						]
+					),
+					'amount' => [
+						'currency_code' => get_woocommerce_currency(),
+						'value' => $order->get_total(),
+					],
+					'description' => get_bloginfo( 'name' ), // TODO
+					'payee' => [
+						// TODO: For spike only, to be able to test a different payee.
+						// This should be $this->gateway->get_option( 'email' ) in the future.
+						'email_address' => get_option( 'wc_paypal_api_payee_email' ),
+					],
+				],
+			],
+			'application_context' => [
+				'return_url' => esc_url_raw( add_query_arg( 'utm_nooverride', '1', $this->gateway->get_return_url( $order ) ) ), // Customer redirected here on approval
+				'cancel_url' => esc_url_raw( $order->get_cancel_order_url_raw() ),  // Customer redirected here on cancellation
+				//'locale' => get_locale(), // TODO: PayPal has its own locale format, will need conversion
+			],
+		];
+
+		$request = WP_REST_Request::from_url( get_site_url( null, '/wp-json/wc-paypal-gateway-proxy/v1/create-order' ) );
+		$request->set_method( 'POST' );
+		$request->set_header( 'Content-Type', 'application/json' );
+		// TODO: Authenticate with wpcom.
+		// $request->set_header( 'Authorization', 'Bearer ' . $wpcom_blog_token );
+		$request->set_body( json_encode( $order_details ) );
+		$response = rest_do_request( $request );
+
+		$data = $response->get_data();
+		if ( 200 === $response->get_status() && isset( $data['id'] ) && isset( $data['links'] ) ) {
+			// Find the 'approve' link in the response -- this is where we will redirect the customer to
+			$redirect_url = null;
+			foreach ( $data['links'] as $link ) {
+				if ( $link['rel'] === 'approve' && $link['method'] === 'GET' ) {
+					$redirect_url = $link['href'];
+					break;
+				}
+			}
+
+			return [
+				'id' => $data['id'],
+				'redirect_url' => $redirect_url,
+			];
+		} else {
+			error_log( '(Client) PayPal order creation request failed: ' . print_r( $data, true ) );
+			return null;
+		}
+	}
+
+	public function capture_payment( $order, $capture_url ) {
+		$paypal_order_id = $order->get_meta( '_paypal_order_id' );
+		if ( ! $paypal_order_id ) {
+			error_log( '(Client) PayPal order ID not found. Cannot capture order.' );
+			return null;
+		}
+
+		$request = WP_REST_Request::from_url( get_site_url( null, '/wp-json/wc-paypal-gateway-proxy/v1/capture-payment' ) );
+		$request->set_method( 'POST' );
+		$request->set_header( 'Content-Type', 'application/json' );
+		// TODO: Authenticate with wpcom.
+		// $request->set_header( 'Authorization', 'Bearer ' . $wpcom_blog_token );
+		$request->set_body( json_encode( [ 'capture_url' => $capture_url, 'paypal_order_id' => $paypal_order_id ] ) );
+		$response = rest_do_request( $request );
+
+		if ( 200 !== $response->get_status() ) {
+			error_log( '(Client) PayPal capture payment request failed: ' . print_r( $response->get_data(), true ) );
+			return false;
+		}
+
+		$data = $response->get_data();
+		error_log( '(Client) PayPal capture payment response: ' . print_r( $data, true ) );
+		return true;
 	}
 
 	/**

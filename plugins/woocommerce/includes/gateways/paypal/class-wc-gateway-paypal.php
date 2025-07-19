@@ -370,9 +370,21 @@ class WC_Gateway_Paypal extends WC_Payment_Gateway {
 		$order          = wc_get_order( $order_id );
 		$paypal_request = new WC_Gateway_Paypal_Request( $this );
 
+		if ( $this->use_orders_v2() ) {
+			$paypal_order = $paypal_request->create_paypal_order( $order );
+			if ( ! $paypal_order ) {
+				throw new Exception( 'PayPal order creation failed' );
+			}
+			$order->update_meta_data( '_paypal_order_id', $paypal_order['id'] );
+			$order->save();
+			$redirect_url = $paypal_order['redirect_url'];
+		} else {
+			$redirect_url = $paypal_request->get_request_url( $order, $this->testmode );
+		}
+
 		return array(
 			'result'   => 'success',
-			'redirect' => $paypal_request->get_request_url( $order, $this->testmode ),
+			'redirect' => $redirect_url,
 		);
 	}
 
@@ -562,5 +574,27 @@ class WC_Gateway_Paypal extends WC_Payment_Gateway {
 		);
 
 		return is_countable( $paypal_orders ) ? 1 === count( $paypal_orders ) : false;
+	}
+
+	/**
+	 * Checks if the gateway should use Orders v2 API.
+	 *
+	 * TODO: We expect this flag to be true if the merchant can be migrated,
+	 * i.e. does not need PayPal API keys, and they have accepted ToS.
+	 *
+	 * @return bool
+	 */
+	protected function use_orders_v2() {
+		$paypal_settings = get_option( 'woocommerce_paypal_settings' );
+
+		/**
+		 * Filters whether the gateway should use Orders v2 API.
+		 *
+		 * @param bool $use_orders_v2 Whether the gateway should use Orders v2 API.
+		 */
+		return apply_filters(
+			'woocommerce_paypal_use_orders_v2',
+			isset( $paypal_settings['use_orders_v2'] ) && 'yes' === $paypal_settings['use_orders_v2']
+		);
 	}
 }
