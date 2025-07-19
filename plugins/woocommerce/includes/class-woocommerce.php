@@ -244,6 +244,9 @@ final class WooCommerce {
 
 		// Webhook listener for the simple proxy PoC.
 		include_once dirname( __FILE__ ) . '/gateways/paypal/includes/proxy/class-wc-gateway-paypal-proxy-webhook-handler.php';
+
+		// Proxy for the PayPal API.
+		include_once dirname( __FILE__ ) . '/gateways/paypal/includes/proxy/class-wc-gateway-paypal-proxy.php';
 	}
 
 	/**

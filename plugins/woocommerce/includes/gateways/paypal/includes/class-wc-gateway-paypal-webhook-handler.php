@@ -34,7 +34,7 @@ class WC_Gateway_Paypal_Webhook_Handler {
         // TODO: Validate the webhook signature
 
         $data = $request->get_json_params();
-        error_log( '(Client) PayPal webhook received: ' . print_r( $data, true ) );
+        error_log( '(Client) Webhook received: ' . print_r( $data, true ) );
 
         switch ( $data['event_type'] ) {
             case 'CHECKOUT.ORDER.APPROVED':
@@ -59,8 +59,7 @@ class WC_Gateway_Paypal_Webhook_Handler {
 
                     $gateway = WC()->payment_gateways()->payment_gateways()['paypal'];
                     $paypal_request = new WC_Gateway_Paypal_Request( $gateway );
-                    $result = $paypal_request->capture_paypal_order( $order, $capture_url );
-                    error_log( 'PayPal capture result: ' . print_r( $result, true ) );
+                    $paypal_request->capture_payment( $order, $capture_url );
                 }
                 break;
             case 'PAYMENT.CAPTURE.COMPLETED':
